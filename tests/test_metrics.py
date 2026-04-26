@@ -60,6 +60,20 @@ def test_compute_percentile_p90():
     assert 8.5 < result < 9.5
 
 
+def test_compute_mfu_negative_tokens():
+    assert compute_mfu(-1.0) == 0.0
+
+
+def test_compute_percentile_empty_list():
+    assert compute_percentile([], 50) == 0.0
+
+
+def test_compute_gpu_idle_pct_mismatched_lengths():
+    import pytest
+    with pytest.raises(ValueError, match="equal length"):
+        compute_gpu_idle_pct([1.0, 2.0], [0.4])
+
+
 def test_get_memory_headroom_pct_in_valid_range():
     pct = get_memory_headroom_pct()
     assert 0.0 <= pct <= 100.0

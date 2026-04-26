@@ -17,8 +17,12 @@ def compute_mfu(
     n_params: int = GPT2_SMALL_PARAMS,
     peak_flops: float = PEAK_FLOPS_FP32,
 ) -> float:
-    """MFU = (tokens/sec × 6 × N_params) / peak_flops. 6N = 2x fwd + 4x bwd."""
-    if tokens_per_sec == 0.0:
+    """MFU = (tokens/sec × 6 × N_params) / peak_flops.
+
+    6N is the standard FLOPs estimate per training token: ~1x forward,
+    ~2x backward (chain rule), ~1x gradient accumulation ≈ 6 total.
+    """
+    if tokens_per_sec <= 0.0:
         return 0.0
     return (tokens_per_sec * 6 * n_params) / peak_flops
 
@@ -30,6 +34,11 @@ def compute_gpu_idle_pct(
     """GPU idle % = mean(load_time / step_time) × 100 across all steps."""
     if not step_times:
         return 0.0
+    if len(step_times) != len(load_times):
+        raise ValueError(
+            f"step_times and load_times must have equal length, "
+            f"got {len(step_times)} and {len(load_times)}"
+        )
     ratios = [lt / st for lt, st in zip(load_times, step_times) if st > 0]
     if not ratios:
         return 0.0
@@ -37,6 +46,9 @@ def compute_gpu_idle_pct(
 
 
 def compute_percentile(values: list[float], p: int) -> float:
+    """Return the p-th percentile of values using numpy linear interpolation."""
+    if not values:
+        return 0.0
     return float(np.percentile(values, p))
 
 
