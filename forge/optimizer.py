@@ -45,7 +45,7 @@ def _apply_fix(config: HarnessConfig, fix_name: str) -> HarnessConfig:
     if fix_name == "num_workers":
         # Use half the logical CPUs — enough to saturate prefetch without
         # competing with the MPS process (which uses the P-cores heavily).
-        return dataclasses.replace(config, num_workers=max(1, os.cpu_count() // 2))
+        return dataclasses.replace(config, num_workers=max(1, (os.cpu_count() or 4) // 2))
     if fix_name == "pin_memory":
         # Page-locked host memory enables async DMA to the GPU, eliminating
         # the CPU stall during H→D transfer when num_workers > 0.

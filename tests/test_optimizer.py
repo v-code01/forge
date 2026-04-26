@@ -1,11 +1,9 @@
-import dataclasses
 from unittest.mock import patch
 
 import pytest
 
 from forge.harness import BASELINE_CONFIG
 from forge.profiler import ProfileResult
-from forge.harness import StepProfile
 
 
 def _make_profile(tokens_per_sec: float) -> ProfileResult:
