@@ -9,3 +9,11 @@ configs/optimal.yaml
 *.egg-info/
 dist/
 build/
+.venv/
+venv/
+.benchmarks/
+.coverage
+htmlcov/
+*.log
+*.safetensors
+*.bin
