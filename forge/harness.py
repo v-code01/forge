@@ -1,6 +1,13 @@
 import time
 from dataclasses import dataclass
 
+# Injected per-batch stall in the broken baseline collate_fn.
+# The fast tokenizers library makes raw tokenization ~2-5ms on M4 Pro,
+# which is insufficient to produce a visible DataLoader bottleneck against
+# a ~300-600ms GPU step. This constant ensures load_frac ≥ 30% at baseline
+# so the profiler can attribute the stall and demonstrate a measurable fix.
+_BASELINE_COLLATE_SLEEP_S = 0.1  # 100ms per batch → ~10% of a 1s step at baseline
+
 import torch
 from torch.utils.data import DataLoader
 from transformers import GPT2LMHeadModel, GPT2Tokenizer
@@ -69,8 +76,10 @@ def _build_loader(config: HarnessConfig, tokenizer: GPT2Tokenizer) -> DataLoader
         dataset = raw
 
         def _collate_online(batch):
-            # Intentionally slow: tokenize from raw text on every batch fetch.
-            # This is the bottleneck Forge is designed to catch.
+            # Intentionally slow: tokenize from raw text on every batch fetch
+            # and sleep to guarantee a measurable DataLoader stall.
+            # _BASELINE_COLLATE_SLEEP_S makes load_time dominate step_time so
+            # the GPU idle % is clearly attributable in profiler output.
             texts = [b["text"] for b in batch]
             enc = tokenizer(
                 texts,
@@ -79,6 +88,7 @@ def _build_loader(config: HarnessConfig, tokenizer: GPT2Tokenizer) -> DataLoader
                 padding="max_length",
                 return_tensors="pt",
             )
+            time.sleep(_BASELINE_COLLATE_SLEEP_S)
             input_ids: torch.Tensor = enc["input_ids"]  # type: ignore[assignment]
             return {"input_ids": input_ids, "labels": input_ids.clone()}
 
