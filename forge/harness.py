@@ -4,9 +4,9 @@ from dataclasses import dataclass
 # Injected per-batch stall in the broken baseline collate_fn.
 # The fast tokenizers library makes raw tokenization ~2-5ms on M4 Pro,
 # which is insufficient to produce a visible DataLoader bottleneck against
-# a ~300-600ms GPU step. This constant ensures load_frac ≥ 30% at baseline
+# a ~300-600ms GPU step. This constant ensures load_frac ≥ 15% at baseline
 # so the profiler can attribute the stall and demonstrate a measurable fix.
-_BASELINE_COLLATE_SLEEP_S = 0.1  # 100ms per batch → ~10% of a 1s step at baseline
+_BASELINE_COLLATE_SLEEP_S = 0.1  # 100ms per batch
 
 import torch
 from torch.utils.data import DataLoader
@@ -50,6 +50,43 @@ class StepProfile:
     tokens: int            # batch_size × seq_len
 
 
+class _OnlineCollate:
+    """Module-level callable — must be at top level so DataLoader workers can pickle it.
+
+    Python 3.13 on macOS uses spawn multiprocessing; closures defined inside
+    functions are not picklable under spawn. This class captures tokenizer and
+    seq_len as instance state instead.
+    """
+
+    def __init__(self, tokenizer: GPT2Tokenizer, seq_len: int) -> None:
+        self.tokenizer = tokenizer
+        self.seq_len = seq_len
+
+    def __call__(self, batch: list) -> dict:
+        # Intentionally slow: live tokenize + sleep to guarantee a measurable
+        # DataLoader stall. _BASELINE_COLLATE_SLEEP_S makes load_time dominate
+        # step_time so GPU idle % is clearly attributable in profiler output.
+        texts = [b["text"] for b in batch]
+        enc = self.tokenizer(
+            texts,
+            truncation=True,
+            max_length=self.seq_len,
+            padding="max_length",
+            return_tensors="pt",
+        )
+        time.sleep(_BASELINE_COLLATE_SLEEP_S)
+        input_ids: torch.Tensor = enc["input_ids"]  # type: ignore[assignment]
+        return {"input_ids": input_ids, "labels": input_ids.clone()}
+
+
+class _OfflineCollate:
+    """Module-level callable for pre-tokenised tensors (picklable under spawn)."""
+
+    def __call__(self, batch: list) -> dict:
+        ids = torch.stack([b["input_ids"] for b in batch])
+        return {"input_ids": ids, "labels": ids.clone()}
+
+
 def _build_loader(config: HarnessConfig, tokenizer: GPT2Tokenizer) -> DataLoader:
     raw = load_dataset("wikitext", "wikitext-2-raw-v1", split="train")
     raw = raw.filter(lambda x: len(x["text"].strip()) > config.seq_len)
@@ -65,34 +102,11 @@ def _build_loader(config: HarnessConfig, tokenizer: GPT2Tokenizer) -> DataLoader
 
         dataset = raw.map(_tokenize, batched=True, remove_columns=["text"])
         dataset.set_format("torch", columns=["input_ids"])
-
-        def _collate_offline(batch):
-            ids = torch.stack([b["input_ids"] for b in batch])
-            return {"input_ids": ids, "labels": ids.clone()}
-
-        collate_fn = _collate_offline
+        collate_fn = _OfflineCollate()
 
     else:
         dataset = raw
-
-        def _collate_online(batch):
-            # Intentionally slow: tokenize from raw text on every batch fetch
-            # and sleep to guarantee a measurable DataLoader stall.
-            # _BASELINE_COLLATE_SLEEP_S makes load_time dominate step_time so
-            # the GPU idle % is clearly attributable in profiler output.
-            texts = [b["text"] for b in batch]
-            enc = tokenizer(
-                texts,
-                truncation=True,
-                max_length=config.seq_len,
-                padding="max_length",
-                return_tensors="pt",
-            )
-            time.sleep(_BASELINE_COLLATE_SLEEP_S)
-            input_ids: torch.Tensor = enc["input_ids"]  # type: ignore[assignment]
-            return {"input_ids": input_ids, "labels": input_ids.clone()}
-
-        collate_fn = _collate_online
+        collate_fn = _OnlineCollate(tokenizer, config.seq_len)
 
     return DataLoader(
         dataset,  # type: ignore[arg-type]
