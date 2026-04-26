@@ -17,6 +17,11 @@ def _step(i, load, transfer, forward, backward, opt):
     )
 
 
+def test_aggregate_returns_profile_result():
+    steps = [_step(i, 0.4, 0.05, 0.3, 0.2, 0.05) for i in range(3)]
+    assert isinstance(_aggregate(steps), ProfileResult)
+
+
 def test_aggregate_gpu_idle_pct():
     steps = [_step(i, 0.4, 0.05, 0.3, 0.2, 0.05) for i in range(5)]
     result = _aggregate(steps)
