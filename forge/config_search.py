@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass, replace
+from itertools import product
 
 import yaml
 
@@ -25,47 +26,50 @@ def config_search(n_steps: int = 50) -> tuple[HarnessConfig, list[SearchResult]]
 
     Runs with all optimizations active (pin_memory, bfloat16, tokenize_offline) to
     isolate the effect of the DataLoader configuration on throughput.
-    Selection criterion: max tokens/sec where memory_used < 80%.
+    Selection criterion: max tokens/sec where memory_used_pct < 80%.
+    If no cell qualifies (all OOM or all above memory threshold), returns BASELINE_CONFIG.
     """
     results: list[SearchResult] = []
     best_config = BASELINE_CONFIG
     best_tps = 0.0
 
-    total = len(NUM_WORKERS_GRID) * len(BATCH_SIZE_GRID)
-    i = 0
+    cells = list(product(NUM_WORKERS_GRID, BATCH_SIZE_GRID))
+    total = len(cells)
 
-    for nw in NUM_WORKERS_GRID:
-        for bs in BATCH_SIZE_GRID:
-            i += 1
-            print(f"  [{i}/{total}] workers={nw} batch={bs}...", end="\r", flush=True)
-            cfg = replace(
-                BASELINE_CONFIG,
-                num_workers=nw,
-                pin_memory=True,
-                dtype="bfloat16",
-                batch_size=bs,
-                tokenize_offline=True,
-                n_steps=n_steps,
-            )
-            try:
-                result = profile(cfg)
-            except RuntimeError:
-                # OOM or MPS error for large batch sizes — skip cell
-                results.append(SearchResult(nw, bs, 0.0, 100.0))
-                continue
+    for i, (nw, bs) in enumerate(cells, start=1):
+        print(f"  [{i}/{total}] workers={nw} batch={bs}...", end="\r", flush=True)
+        cfg = replace(
+            BASELINE_CONFIG,
+            num_workers=nw,
+            pin_memory=True,
+            dtype="bfloat16",
+            batch_size=bs,
+            tokenize_offline=True,
+            n_steps=n_steps,
+        )
+        try:
+            result = profile(cfg)
+        except Exception:
+            # MPS OOM and device errors surface as RuntimeError, AssertionError,
+            # or torch.OutOfMemoryError depending on PyTorch version — catch all.
+            results.append(SearchResult(nw, bs, 0.0, 100.0))
+            continue
 
-            memory_used_pct = 100.0 - result.memory_headroom_pct
-            results.append(SearchResult(nw, bs, result.tokens_per_sec, memory_used_pct))
+        memory_used_pct = 100.0 - result.memory_headroom_pct
+        results.append(SearchResult(nw, bs, result.tokens_per_sec, memory_used_pct))
 
-            if result.tokens_per_sec > best_tps and memory_used_pct < 80.0:
-                best_tps = result.tokens_per_sec
-                best_config = cfg
+        if result.tokens_per_sec > best_tps and memory_used_pct < 80.0:
+            best_tps = result.tokens_per_sec
+            best_config = cfg
 
-    print()
+    print(" " * 40, end="\r")  # clear progress line
     return best_config, results
 
 
 def save_optimal_yaml(config: HarnessConfig, path: str = "configs/optimal.yaml") -> None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     data = {
         "num_workers": config.num_workers,
         "pin_memory": config.pin_memory,
