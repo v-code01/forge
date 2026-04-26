@@ -1,6 +1,5 @@
 import numpy as np
 import psutil
-import torch
 
 
 # Peak FP32 TFLOPS for M4 Pro 20-core GPU: ~8.1 TFLOPS
