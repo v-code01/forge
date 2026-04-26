@@ -7,6 +7,9 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
+_RESULTS_DIR = Path(__file__).parent / "results"
+_DB_PATH = _RESULTS_DIR / "forge.db"
+
 
 def cmd_baseline(steps: int) -> None:
     from forge.harness import BASELINE_CONFIG
@@ -36,9 +39,9 @@ def cmd_optimize(steps: int) -> None:
     print("\n")
     render_report(result)
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
-    json_path = Path(f"results/{ts}.json")
+    json_path = _RESULTS_DIR / f"{ts}.json"
     save_json(result, json_path)
-    save_to_db(result)
+    save_to_db(result, _DB_PATH)
     print(f"\nResults saved to {json_path}")
 
 
@@ -56,15 +59,21 @@ def cmd_config_search(steps: int) -> None:
 
 
 def cmd_report() -> None:
-    db = Path("results/forge.db")
-    if not db.exists():
+    if not _DB_PATH.exists():
         print("No results found. Run --optimize first.")
         sys.exit(1)
-    with sqlite3.connect(db) as conn:
-        rows = conn.execute(
-            "SELECT timestamp, baseline_tps, optimized_tps, speedup, largest_gain_fix "
-            "FROM runs ORDER BY timestamp DESC LIMIT 10"
-        ).fetchall()
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            rows = conn.execute(
+                "SELECT timestamp, baseline_tps, optimized_tps, speedup, largest_gain_fix "
+                "FROM runs ORDER BY timestamp DESC LIMIT 10"
+            ).fetchall()
+    except sqlite3.OperationalError:
+        print("No runs recorded yet. Run --optimize first.")
+        sys.exit(1)
+    if not rows:
+        print("No runs recorded yet. Run --optimize first.")
+        sys.exit(0)
     print(f"\n{'Timestamp':<22} {'Baseline':>10} {'Optimized':>10} {'Speedup':>9} {'Largest gain':>14}")
     print("-" * 70)
     for r in rows:
@@ -106,6 +115,8 @@ examples:
         cmd_config_search(args.steps)
     elif args.report:
         cmd_report()
+    else:
+        parser.error("Unhandled command — this is a bug")
 
 
 if __name__ == "__main__":
