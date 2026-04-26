@@ -1,6 +1,5 @@
-import dataclasses
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from forge.harness import HarnessConfig, BASELINE_CONFIG
 from forge.profiler import ProfileResult, profile
@@ -45,23 +44,23 @@ def _apply_fix(config: HarnessConfig, fix_name: str) -> HarnessConfig:
     if fix_name == "num_workers":
         # Use half the logical CPUs — enough to saturate prefetch without
         # competing with the MPS process (which uses the P-cores heavily).
-        return dataclasses.replace(config, num_workers=max(1, (os.cpu_count() or 4) // 2))
+        return replace(config, num_workers=max(1, (os.cpu_count() or 4) // 2))
     if fix_name == "pin_memory":
         # Page-locked host memory enables async DMA to the GPU, eliminating
         # the CPU stall during H→D transfer when num_workers > 0.
-        return dataclasses.replace(config, pin_memory=True)
+        return replace(config, pin_memory=True)
     if fix_name == "bfloat16":
         # BF16 halves bandwidth on weight loads and doubles effective FLOPS
         # on MPS (no fp16 GEMM, but BF16 is natively supported from M2+).
-        return dataclasses.replace(config, dtype="bfloat16")
+        return replace(config, dtype="bfloat16")
     if fix_name == "batch_size":
         # 32 is 4× the baseline (8) — saturates the MPS queue without OOM
         # on 16 GB unified memory with GPT-2 Small (117 M params).
-        return dataclasses.replace(config, batch_size=32)
+        return replace(config, batch_size=32)
     if fix_name == "tokenize_offline":
         # Pre-tokenise the dataset once and cache as tensors, eliminating
         # the per-batch tokenizer call that dominates load_time at baseline.
-        return dataclasses.replace(config, tokenize_offline=True)
+        return replace(config, tokenize_offline=True)
     raise ValueError(f"Unknown fix: {fix_name}")
 
 

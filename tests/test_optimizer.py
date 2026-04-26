@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 
 from forge.harness import BASELINE_CONFIG
+from forge.optimizer import optimize, OptimizeResult
 from forge.profiler import ProfileResult
 
 
@@ -26,8 +27,6 @@ def _make_profile(tokens_per_sec: float) -> ProfileResult:
 
 @patch("forge.optimizer.profile")
 def test_optimize_returns_optimized_result(mock_profile):
-    from forge.optimizer import optimize, OptimizeResult
-    # 6 calls: 1 baseline + 5 fix profiles (last fix profile becomes .optimized)
     mock_profile.side_effect = [_make_profile(t) for t in [100, 400, 450, 500, 550, 600]]
     result = optimize(BASELINE_CONFIG)
     assert isinstance(result, OptimizeResult)
@@ -36,18 +35,10 @@ def test_optimize_returns_optimized_result(mock_profile):
 
 
 @patch("forge.optimizer.profile")
-def test_optimize_has_five_fixes(mock_profile):
-    from forge.optimizer import optimize
+def test_optimize_fix_names_in_order(mock_profile):
     mock_profile.side_effect = [_make_profile(t) for t in [100, 400, 450, 500, 550, 600]]
     result = optimize(BASELINE_CONFIG)
     assert len(result.fixes) == 5
-
-
-@patch("forge.optimizer.profile")
-def test_optimize_fix_names_in_order(mock_profile):
-    from forge.optimizer import optimize
-    mock_profile.side_effect = [_make_profile(t) for t in [100, 400, 450, 500, 550, 600]]
-    result = optimize(BASELINE_CONFIG)
     assert [f.fix_name for f in result.fixes] == [
         "num_workers", "pin_memory", "bfloat16", "batch_size", "tokenize_offline"
     ]
@@ -55,17 +46,17 @@ def test_optimize_fix_names_in_order(mock_profile):
 
 @patch("forge.optimizer.profile")
 def test_optimize_first_fix_delta(mock_profile):
-    from forge.optimizer import optimize
     mock_profile.side_effect = [_make_profile(t) for t in [100, 400, 450, 500, 550, 600]]
     result = optimize(BASELINE_CONFIG)
-    # Fix 1: 100 → 400, delta = (400-100)/100 * 100 = 300%
-    assert result.fixes[0].delta_pct == pytest.approx(300.0)
     assert result.fixes[0].fix_name == "num_workers"
+    assert result.fixes[0].tokens_per_sec_before == pytest.approx(100.0)
+    assert result.fixes[0].tokens_per_sec_after == pytest.approx(400.0)
+    # (400 - 100) / 100 * 100 = 300%
+    assert result.fixes[0].delta_pct == pytest.approx(300.0)
 
 
 @patch("forge.optimizer.profile")
 def test_optimize_largest_gain_identified(mock_profile):
-    from forge.optimizer import optimize
     mock_profile.side_effect = [_make_profile(t) for t in [100, 400, 450, 500, 550, 600]]
     result = optimize(BASELINE_CONFIG)
     # Fix 1: +300%, Fix 2: +12.5%, Fix 3: +11.1%, Fix 4: +10%, Fix 5: +9%
