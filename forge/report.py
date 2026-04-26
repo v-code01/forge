@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rich import box
@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.table import Table
 
 from forge.optimizer import OptimizeResult
+from forge.profiler import ProfileResult
 
 
 console = Console()
@@ -42,7 +43,7 @@ def render_report(result: OptimizeResult) -> None:
             f"  [{i}] {fix.fix_name:<22} "
             f"[cyan]{fix.tokens_per_sec_before:.0f}[/cyan] → "
             f"[green]{fix.tokens_per_sec_after:.0f}[/green] tok/s  "
-            f"[yellow]+{fix.delta_pct:.0f}%[/yellow]{marker}"
+            f"[yellow]{fix.delta_pct:+.0f}%[/yellow]{marker}"
         )
 
     speedup = o.tokens_per_sec / b.tokens_per_sec if b.tokens_per_sec > 0 else 0.0
@@ -51,7 +52,8 @@ def render_report(result: OptimizeResult) -> None:
 
 
 def save_json(result: OptimizeResult, path: Path) -> Path:
-    def _prof(p):
+    """Write OptimizeResult to JSON at path. Creates parent dirs. Overwrites if exists."""
+    def _prof(p: ProfileResult) -> dict[str, float]:
         return {
             "tokens_per_sec": p.tokens_per_sec,
             "mfu": p.mfu,
@@ -62,7 +64,7 @@ def save_json(result: OptimizeResult, path: Path) -> Path:
         }
 
     data = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "baseline": _prof(result.baseline),
         "optimized": _prof(result.optimized),
         "fixes": [
@@ -76,45 +78,43 @@ def save_json(result: OptimizeResult, path: Path) -> Path:
         ],
         "largest_gain_fix": result.largest_gain_fix,
     }
-    path.parent.mkdir(exist_ok=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2))
     return path
 
 
 def save_to_db(result: OptimizeResult, db_path: Path = Path("results/forge.db")) -> None:
-    db_path.parent.mkdir(exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS runs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT,
-            baseline_tps REAL,
-            optimized_tps REAL,
-            speedup REAL,
-            largest_gain_fix TEXT,
-            baseline_mfu REAL,
-            optimized_mfu REAL,
-            baseline_gpu_idle REAL,
-            optimized_gpu_idle REAL
-        )
-    """)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     speedup = (result.optimized.tokens_per_sec / result.baseline.tokens_per_sec
                if result.baseline.tokens_per_sec > 0 else 0.0)
-    conn.execute(
-        "INSERT INTO runs (timestamp, baseline_tps, optimized_tps, speedup, largest_gain_fix,"
-        " baseline_mfu, optimized_mfu, baseline_gpu_idle, optimized_gpu_idle)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (
-            datetime.utcnow().isoformat(),
-            result.baseline.tokens_per_sec,
-            result.optimized.tokens_per_sec,
-            speedup,
-            result.largest_gain_fix,
-            result.baseline.mfu,
-            result.optimized.mfu,
-            result.baseline.gpu_idle_pct,
-            result.optimized.gpu_idle_pct,
-        ),
-    )
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                baseline_tps REAL,
+                optimized_tps REAL,
+                speedup REAL,
+                largest_gain_fix TEXT,
+                baseline_mfu REAL,
+                optimized_mfu REAL,
+                baseline_gpu_idle REAL,
+                optimized_gpu_idle REAL
+            )
+        """)
+        conn.execute(
+            "INSERT INTO runs (timestamp, baseline_tps, optimized_tps, speedup, largest_gain_fix,"
+            " baseline_mfu, optimized_mfu, baseline_gpu_idle, optimized_gpu_idle)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                datetime.now(timezone.utc).isoformat(),
+                result.baseline.tokens_per_sec,
+                result.optimized.tokens_per_sec,
+                speedup,
+                result.largest_gain_fix,
+                result.baseline.mfu,
+                result.optimized.mfu,
+                result.baseline.gpu_idle_pct,
+                result.optimized.gpu_idle_pct,
+            ),
+        )
