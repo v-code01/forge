@@ -110,7 +110,7 @@ python forge.py --report
 python forge.py --ddp-probe --steps 20
 ```
 
-Results are saved to `results/{timestamp}.json` and `results/forge.db`.
+Results are saved to `results/20260426T232423.json` (timestamped per run) and `results/forge.db` (SQLite, append-only).
 
 ## Stack
 
