@@ -58,6 +58,29 @@ def cmd_config_search(steps: int) -> None:
         print(f"  {r.num_workers:>7} {r.batch_size:>6} {r.tokens_per_sec:>10.0f} {r.memory_used_pct:>6.0f}")
 
 
+def cmd_ddp_probe(steps: int) -> None:
+    from forge.distributed import probe_ddp
+    world_sizes = [1, 2, 4]
+    print(f"\nDDP probe — GLOO backend, {steps} steps per world size")
+    print(f"Model: ~4M params (~16MB gradient per allreduce)\n")
+    results = probe_ddp(world_sizes=world_sizes, n_steps=steps)
+    print(f"  {'Workers':>8} {'Compute':>10} {'Allreduce':>11} {'Comms%':>8} {'Tok/s':>10}")
+    print("  " + "-" * 52)
+    for r in results:
+        print(
+            f"  {r.world_size:>8} "
+            f"{r.compute_ms:>9.0f}ms "
+            f"{r.allreduce_ms:>10.1f}ms "
+            f"{r.comms_frac * 100:>7.1f}% "
+            f"{r.tokens_per_sec:>10.0f}"
+        )
+    print()
+    print("  Note: GLOO/localhost uses shared-memory memcpy — allreduce cost is")
+    print("  ~10-100x lower than NCCL/EFA over a real network fabric.")
+    print("  On 8×A100 with 100GbE, comms_frac is typically 15–40% for GPT-2 scale.")
+    print("  comms_frac is the distributed analog of Forge's gpu_idle_pct.")
+
+
 def cmd_report() -> None:
     if not _DB_PATH.exists():
         print("No results found. Run --optimize first.")
@@ -91,6 +114,7 @@ examples:
   python forge.py --config-search        # grid search optimal DataLoader config
   python forge.py --report               # show run history
   python forge.py --optimize --steps 20  # quick 20-step run
+  python forge.py --ddp-probe             # measure allreduce overhead vs world size
         """,
     )
     group = parser.add_mutually_exclusive_group(required=True)
@@ -102,6 +126,8 @@ examples:
                        help="Grid search optimal num_workers × batch_size")
     group.add_argument("--report", action="store_true",
                        help="Show history of benchmark results from SQLite")
+    group.add_argument("--ddp-probe", action="store_true",
+                       help="Measure gradient allreduce overhead vs world size (GLOO/CPU)")
     parser.add_argument("--steps", type=int, default=100,
                         help="Training steps per benchmark phase (default: 100)")
 
@@ -115,6 +141,8 @@ examples:
         cmd_config_search(args.steps)
     elif args.report:
         cmd_report()
+    elif args.ddp_probe:
+        cmd_ddp_probe(args.steps)
     else:
         parser.error("Unhandled command — this is a bug")
 
