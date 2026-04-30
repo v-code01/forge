@@ -38,7 +38,7 @@ python forge.py --ddp-probe --steps 20
 ```
 
 ```
-DDP probe — GLOO backend, 20 steps per world size
+DDP probe: GLOO backend, 20 steps per world size
 Model: ~4M params (~16MB gradient per allreduce)
 
   Workers    Compute   Allreduce   Comms%      Tok/s
@@ -122,4 +122,4 @@ Python 3.13 · PyTorch 2.4 + MPS · transformers · datasets · rich · SQLite �
 pytest tests/ -v   # 30 tests, no MPS hardware required for unit tests
 ```
 
-Unit tests run without MPS — hardware-dependent calls are mocked at the boundary. `--ddp-probe` tests use GLOO on CPU and run on any machine.
+Unit tests run without MPS; hardware-dependent calls are mocked at the boundary. `--ddp-probe` tests use GLOO on CPU and run on any machine.
