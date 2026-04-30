@@ -2,7 +2,7 @@
 
 Training efficiency profiler and optimizer for GPT-2 Small on Apple Silicon (MPS).
 
-Forge diagnoses GPU starvation in a deliberately broken training loop, applies five sequential fixes, and measures the per-fix throughput delta. The goal is to make the distinction between *GPU utilization %* and *Model FLOP Utilization (MFU)* concrete and measurable — and to show how the same diagnostic methodology extends to multi-node distributed training.
+Forge diagnoses GPU starvation in a deliberately broken training loop, applies five sequential fixes, and measures the per-fix throughput delta. The goal is to make the distinction between *GPU utilization %* and *Model FLOP Utilization (MFU)* concrete and measurable, and to show how the same diagnostic methodology extends to multi-node distributed training.
 
 ## Results (M4 Pro, 20-core GPU, 100 steps)
 
@@ -25,7 +25,7 @@ Forge diagnoses GPU starvation in a deliberately broken training loop, applies f
 | `batch_size` (8 → 32) | 4,100 tok/s | 4,804 tok/s | **+17%** |
 | `tokenize_offline` | 4,804 tok/s | 4,769 tok/s | −1% |
 
-The two fixes that matter are `num_workers` and `batch_size`. `pin_memory` is silently ignored by MPS (PyTorch warns). `bfloat16` and `tokenize_offline` are marginal at GPT-2 Small scale — the former because MPS has no dedicated BF16 tensor units, the latter because parallel workers already hide tokenization latency.
+The two fixes that matter are `num_workers` and `batch_size`. `pin_memory` is silently ignored by MPS (PyTorch warns). `bfloat16` and `tokenize_offline` are marginal at GPT-2 Small scale; the former because MPS has no dedicated BF16 tensor units, the latter because parallel workers already hide tokenization latency.
 
 ## Scaling to multi-node: the `comms_frac` metric
 
@@ -47,13 +47,13 @@ Model: ~4M params (~16MB gradient per allreduce)
         2       119ms       39.0ms    24.7%       6479
         4       221ms       77.5ms    26.0%       3431
 
-  Note: GLOO/localhost uses shared-memory memcpy — allreduce cost is
+  Note: GLOO/localhost uses shared-memory memcpy, allreduce cost is
   ~10-100x lower than NCCL/EFA over a real network fabric.
   On 8×A100 with 100GbE, comms_frac is typically 15–40% for GPT-2 scale.
   comms_frac is the distributed analog of Forge's gpu_idle_pct.
 ```
 
-`comms_frac = allreduce_time / step_time` — exactly what `gpu_idle_pct` measures for DataLoader starvation, applied to the distributed bottleneck. The fix is the same class of solution: overlap communication with computation (gradient bucketing, async allreduce, FSDP sharding) just as DataLoader starvation is fixed by prefetching with `num_workers`.
+`comms_frac = allreduce_time / step_time`: exactly what `gpu_idle_pct` measures for DataLoader starvation, applied to the distributed bottleneck. The fix is the same class of solution: overlap communication with computation (gradient bucketing, async allreduce, FSDP sharding) just as DataLoader starvation is fixed by prefetching with `num_workers`.
 
 ### Mapping single-GPU findings to 8×A100
 
@@ -71,7 +71,7 @@ The profiling infrastructure in `forge/profiler.py` (`ProfileResult`, per-phase 
 
 **MFU** = (tokens/sec × 6 × N\_params) / peak\_FLOPS
 
-The 6× is the standard training FLOPs estimate: ~1× forward, ~2× backward (chain rule), ~1× gradient accumulation. For GPT-2 Small (117 M params) on M4 Pro (8.1 TFLOPS FP32), MFU is a relative efficiency indicator — not comparable to CUDA figures because MPS has no Tensor Cores.
+The 6× is the standard training FLOPs estimate: ~1× forward, ~2× backward (chain rule), ~1× gradient accumulation. For GPT-2 Small (117 M params) on M4 Pro (8.1 TFLOPS FP32), MFU is a relative efficiency indicator, not comparable to CUDA figures because MPS has no Tensor Cores.
 
 **GPU idle %** = mean(load\_time / step\_time) × 100
 
